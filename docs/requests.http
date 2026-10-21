@@ -1,0 +1,208 @@
+### Ekstensi VS Code: "REST Client" (humao.rest-client). Klik "Send Request" di atas tiap request.
+### Urutan: jalankan dulu request LOGIN di bagian 2 -> token otomatis dipakai request lain.
+### Password semua akun seed: rahasia123 (jalankan database/04-seed-password-hashes.sql lebih dulu).
+
+@base = http://localhost:3000/api/v1
+
+############################################################ 0. HEALTH
+GET http://localhost:3000/health
+
+############################################################ 1. REGISTER (publik) -> role otomatis customer
+POST {{base}}/auth/register
+Content-Type: application/json
+
+{ "name": "Budi Santoso", "email": "budi@student.test", "password": "rahasia123" }
+
+### Register GAGAL validasi -> 400, format error { status: fail, message, errors[] }
+POST {{base}}/auth/register
+Content-Type: application/json
+
+{ "name": "ab", "email": "bukan-email", "password": "pendek" }
+
+### Register menyelundupkan role -> 400 (body strict)
+POST {{base}}/auth/register
+Content-Type: application/json
+
+{ "name": "Hacker", "email": "hacker@student.test", "password": "rahasia123", "role": "admin" }
+
+############################################################ 2. LOGIN (publik) -> simpan token per role
+# @name loginAdmin
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "admin@kantin.test", "password": "rahasia123" }
+
+###
+# @name loginOwner
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "tini@kantin.test", "password": "rahasia123" }
+
+###
+# @name loginCustomer
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "bagas@student.test", "password": "rahasia123" }
+
+### Login salah -> 401
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "admin@kantin.test", "password": "salahsalah" }
+
+@adminToken = {{loginAdmin.response.body.data.token}}
+@ownerToken = {{loginOwner.response.body.data.token}}
+@customerToken = {{loginCustomer.response.body.data.token}}
+
+############################################################ 3. /auth/me (login, semua role)
+GET {{base}}/auth/me
+Authorization: Bearer {{customerToken}}
+
+### Tanpa token -> 401
+GET {{base}}/auth/me
+
+############################################################ 4. STALLS
+### Publik: daftar (search, category, page, limit) & detail
+GET {{base}}/stalls?search=warung&category=Kwetiau&page=1&limit=5
+###
+GET {{base}}/stalls/1
+
+### Validasi query gagal -> 400
+GET {{base}}/stalls?page=0&limit=500
+
+### Validasi params gagal -> 400
+GET {{base}}/stalls/abc
+
+### POST /stalls (owner/admin). owner_id = user dari token
+POST {{base}}/stalls
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "name": "Kantin Baru Bu Tini", "category": "Minuman", "location": "Kantin FKIP", "description": "Es teh dan kopi" }
+
+### Tanpa token -> 401
+POST {{base}}/stalls
+Content-Type: application/json
+
+{ "name": "Kantin Tanpa Token" }
+
+### Role customer -> 403
+POST {{base}}/stalls
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "name": "Kantin Customer" }
+
+### PUT stall MILIK SENDIRI (Bu Tini = owner stall 1) -> 200
+PUT {{base}}/stalls/1
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "description": "Kedai kwetiau goreng & kuah (update)" }
+
+### PUT stall MILIK ORANG LAIN (stall 3 milik Pak Slamet) -> 403
+PUT {{base}}/stalls/3
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "name": "Diambil Alih Bu Tini" }
+
+### Admin boleh ubah stall siapa pun -> 200
+PUT {{base}}/stalls/3
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "description": "Diubah oleh admin" }
+
+### DELETE (admin saja). Owner -> 403
+DELETE {{base}}/stalls/6
+Authorization: Bearer {{ownerToken}}
+
+### DELETE sebagai admin -> 200
+DELETE {{base}}/stalls/6
+Authorization: Bearer {{adminToken}}
+
+############################################################ 5. REVIEW (login, semua role). user dari token
+POST {{base}}/stalls/2/reviews
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "rating": 5, "comment": "Enak dan murah!" }
+
+### Rating di luar 1..5 -> 400
+POST {{base}}/stalls/2/reviews
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "rating": 9 }
+
+### Tanpa token -> 401
+POST {{base}}/stalls/2/reviews
+Content-Type: application/json
+
+{ "rating": 5 }
+
+############################################################ 6. ENDPOINT LAIN (lanjutan Tugas 2)
+### USERS (admin saja)
+GET {{base}}/users
+Authorization: Bearer {{adminToken}}
+###
+POST {{base}}/users
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "name": "Pak Owner Baru", "email": "ownerbaru@kantin.test", "password": "rahasia123", "role": "owner" }
+
+### MENU_ITEMS: baca publik; tulis = owner (kantin miliknya) / admin
+GET {{base}}/menu-items?stall_id=1
+###
+POST {{base}}/menu-items
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "stall_id": 1, "name": "Kwetiau Siram", "price": 16000, "is_available": true }
+
+### Menu di kantin orang lain -> 403
+POST {{base}}/menu-items
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "stall_id": 3, "name": "Menu Curang", "price": 1000 }
+
+### REVIEWS: baca publik; hapus = penulis/admin
+GET {{base}}/reviews?stall_id=1
+###
+DELETE {{base}}/reviews/16
+Authorization: Bearer {{adminToken}}
+
+### LIKES (login). user_id dari token
+POST {{base}}/likes
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "review_id": 3 }
+
+### FLAGS & AUDIT_LOGS (admin saja)
+GET {{base}}/flags?status=pending
+Authorization: Bearer {{adminToken}}
+###
+PUT {{base}}/flags/1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "status": "resolved" }
+###
+GET {{base}}/audit-logs?page=1&limit=10
+Authorization: Bearer {{adminToken}}
+###
+POST {{base}}/audit-logs
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "action": "RESOLVE_FLAG", "target_table": "FLAGS", "target_id": 1, "metadata": { "note": "review dihapus" } }
+
+### Owner mengakses /flags -> 403
+GET {{base}}/flags
+Authorization: Bearer {{ownerToken}}
